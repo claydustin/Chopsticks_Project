@@ -1,0 +1,209 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{times}
+
+\textwidth=6.2in
+\textheight=8.5in
+%\parskip=.3cm
+\oddsidemargin=.1in
+\evensidemargin=.1in
+\headheight=-.3in
+
+\begin{document}
+\SweaveOpts{concordance=TRUE}
+
+\title{Chopsticks House Project}
+\author{Clay Dustin}
+\maketitle
+
+\SweaveOpts{concordance=TRUE}
+
+<<load_packages,echo=FALSE>>=
+require(ggplot2)
+require(gridExtra)
+require(knitr)
+require(xtable)
+require(MASS)
+require(caret)
+require(car)
+require(ppcor)
+require(plyr)
+require(GGally)
+@
+The Chopsticks data set includes data on customer's location, gender, age, race, and the response variable; tip. Information about the delivery's time and how the customer paid are also included. The data includes 786 observations recorded from May 31 to July 18, 2016, but only 384 complete cases. Customer's demographics were not taken from an existing database but observed by the author. The age of each customer was estimated using three brackets; young (-25), middle (25-40), and old (40+). Race and gender were also left to the discretion of the author.
+
+Customers could place delivery orders using online or call-in services. Online orders required credit cards but customers could pay for call-in orders using card or cash. The variable Payment Type refers to the distinction between either card (R) or cash (C) payments.
+\begin{center}
+<<data_load,echo=FALSE,results=tex>>=
+p <- function(x) {formatC(x, format="f", digits=2)}
+df <- read.csv("Chopsticks_Data_Raw.csv", stringsAsFactors=FALSE)
+df <- df[complete.cases(df[,c("Tip","Price","Gender","Race","Payment_Type","Miles","Time_Elapsed")]),]
+for(i in c("Race","Gender","Type","Payment_Type","Age")){
+  df[, i] <- as.factor(df[,i])
+}
+row.names(df) <- 1:nrow(df)
+print(xtable(df[sample(nrow(df),10),c("Time_Elapsed","Price","Tip","Miles","Payment_Type","Gender","Race")],caption="Sample of the Data",label="tab:datahead"),latex.environments="center",floating=FALSE,include.rownames=FALSE)
+@
+\end{center}
+
+\begin{figure}  
+  \begin{center}
+<<box_plot_demographics,echo=FALSE,fig=TRUE>>=
+
+#dff is the data.frame for complete cases under factor variables
+dff <- df[complete.cases(df[,c("Race","Age","Gender","Payment_Type")]),]
+p1 <- ggplot(dff, aes(x = Race, y = Tip)) + geom_boxplot()
+p2 <- ggplot(dff, aes(x = Age, y = Tip)) + geom_boxplot()
+p3 <- ggplot(dff, aes(x = Gender, y = Tip)) + geom_boxplot()
+p4 <- ggplot(dff, aes(x = Payment_Type, y = Tip)) + geom_boxplot() +scale_x_discrete(name="Payment Type")
+grid.arrange(p1,p2, p3,p4, nrow=2)
+@
+  \end{center}
+  \caption{Box Plots for Categorical Variables}
+  \label{fig:categorical}
+\end{figure}
+  
+Figure \ref{fig:categorical} displays boxplots for four predictor variables. Tip variation appears to vary across all variables; race, age, gender, and payment type. Under age the most variation is between young (Y) and old (O) and young and middle age customers. There is much more variation in cash payments (C) compared to credit card (R) payments. Tip varies the most according to race, however. 
+While collecting tips I noted that interaction terms could further explain some of the association among predictor variables. For instance, the effect of distance travelled on tip amount seemed to vary with race. White and latino customersfarther away from Chopsticks typically accounted for the additional travel in their tip whereas black customers tipped the same regardless of distance travelled. 
+
+
+Similarly, the variation explained by Payment Type depended on the race. White customers tip varied way more with cash payments than for cash payments made under other races.
+Latitutde and longitude values were provided by google maps R package "ggmaps" and were used to estimate the Manhattan distance from the restaurant's location. 
+
+\begin{figure}
+  \begin{center}
+<<corr_matrix,echo=FALSE,fig=TRUE>>=
+ggpairs(df[,c("Tip", "Price", "Miles", "Time_Elapsed")])
+lr <- lm(Tip~Price,df)
+summar <- summary(lr)
+df4 <- mutate(df, Race_Color = ifelse(Race=="B",'darkgreen',
+                                      ifelse(Race=="W",'darkgrey',
+                                             ifelse(Race=='A','cyan','brown4'))))
+@
+  \end{center}
+  \caption{Correlation Matrix}
+  \label{fig:corr}
+\end{figure}
+
+In Figure \ref{fig:corr} it appears Tip could be associated with Price. There may also be an association between Miles and Tip but potential outliers obfuscate the linear relationship. Most other predictors express a weak relationship together, even miles and time elapsed resist corrrelation which intuitively sound related. Possible transformations of the data will be discussed later.
+We will treat the Tip measured in US Dollars as a continuous response and the various demographics, payment details, and delivery data as predictors. 
+
+We begin with the simple model which expresses Tip as a function of Price. \[Tip = \beta_0 + \beta_1 Price\] The residual standard error is \Sexpr{p(summar$sigma)} on \Sexpr{p(summar$df.residual)} df. This provides a measure of the extent to which orders with the same price experienced different tips for their delivery. The R^2 for the simple model is \Sexpr{p(summar$r.squared)}. The adjusted \texit{R^2}, \Sexpr{p(summar$adj.r.squared)} gives \texit{R^2} adjusted for the number of parameters in the model making comparisons between more multi-variate models accurate. Table 1 below also shows estimates for the equations constant term and Price coefficient.
+
+\begin{center}
+<<simple_model,echo=FALSE,results=tex>>=
+print(xtable(summary(lr), caption="Summary statistics for simple model", label="tab:simpsummary"),floating=FALSE)
+price <- summar$coefficients[2,]
+@
+  \caption{Summary statistics for simple model}
+  \label{tab:simpsummary}
+\end{center}
+
+We find that on average, each additional dollar in price is associated with a \Sexpr{p(lr$coefficients[2])} increase in Tip, measured from a baseline of an expected \Sexpr{p(lr$coefficients[1])} when price is 0. Using the estimated standard error the corresponding t-test for price on \Sexpr{p(summar$df[2])} df is \Sexpr{p(summar$coefficients[2,"t value"])}, which is highly significant at the 99\% conficent interval. We are 99\% confident the actual coefficient for Price is somewhere between \Sexpr{p(price[1])} \pm \Sexpr{p(price[2]*qt(.9995,summar$df[2]))}. 
+
+Figure \ref{fig:simp} shows the scatterplot of Tip vs. Price. A regression line representing our model is drawn over the points. Most orders were less than \$20. There is a lot of variation around the line for similar x-values. A few Tips when price is \$20 may be considered outliers if residual diagnostics confirm they unfairly influence the coefficient estimate.
+
+\begin{figure}
+  \begin{center}
+<<simple_model_graph,echo=FALSE,fig=TRUE>>=
+p1 <- ggplot(df, aes(x=Price,y=Tip)) + geom_point(shape=1) + geom_smooth(method="glm",se=FALSE)
+p1
+@
+  \end{center}
+  \caption{Scatterplot and Linear Regression for Tip~Price}
+  \label{fig:simp}
+\end{figure}
+
+The main problem with our model is the variability in Tip. The residual standard error provides a measure of the extent to which order with the same price can experience different tips. The standard error is used in parametrizing the sampling distribution of coefficients which is then used in producing prediction intervals. A large standard error reflects high variability and therefore a weak predictive capability. In fact, the residual standard error \Sexpr{summar$sigma} is very close to \Sexpr{sqrt(var(df$Tip))}. If the residual standard error can not be shown to be significantly different from the variability in the unconditional response, then there is little evidence to suggest the linear model has any predictive ability. Regardless, the significance in our coefficient for Price still indicates a strong relationship between Price and Tip, albeit one with little confidence in predicting.
+
+Adding variables may explain some of the variance in Y. We proceed with a stepwise AIC search to find the best subset of predictors. The step function begins with one predictor and successively adds variables having the strongest partial correlation with the dependent variable controlling for variables already in the model. The addition of Race, Payment Type, Gender, a7nd Miles appears to reduce the residual sum of squares enough to justify its addition into the model. Unlike ANOVA, AIC penalizes for any addition of variables, favoring parsimony. 
+
+<<AIC_results,echo=FALSE>>=
+xtable(stepAIC(lr,scope=~Price+Gender+Race+Payment_Type+Miles+Time_Elapsed,direction="forward"))
+lr <- update(lr, ~.+Gender+Race+Payment_Type+Miles+Time_Elapsed)
+summar <- summary(lr)
+@
+
+Time Elapsed was not included in the model selected by AIC. Figure \ref{fig:avp} shows the added variable plots for Time Elapsed and Miles. The slope for Time Elapsed is close to 0, whereas the Miles graph has more evidence suggesting its slope is not 0. This means the information contained within Time Elapsed that explains Tip is already contained in Miles. This makes sense since the farther something is located from the restaurant the longer it takes to deliver. However, these are not completed correlated \Sexpr(cor(df$Time_Elapsed,d$Miles)) because even if a location is close to the restaurant it may make more sense to visit it last on a route because of traffic, one-way streets, or the time the order was placed. Needless to say Time Elapsed did not contain enough information that was not already contained in the variable Miles, the distance traveled. 
+
+\begin{center}
+  \begin{figure}
+<<AIC_analysis,echo=FALSE,fig=TRUE>>=
+avPlotss<- avPlots(lr)
+av7 <- avPlotss[[7]]
+av8 <- avPlotss[[8]]
+p1 <- ggplot(data=data.frame(av7),aes(x=Miles,y=Tip)) + geom_point() + geom_smooth(method="glm",se=FALSE)
+p2 <- ggplot(data=data.frame(av8),aes(x=Time_Elapsed,y=Tip)) + geom_point() + geom_smooth(method = "glm", se=FALSE)
+grid.arrange(p1,p2,nrow=1)
+@
+  \caption{Added Variable Plots for Time Elapsed and Miles}
+  \label{fig:avp}
+  \end{figure}
+\end{center}
+
+The model selected by AIC stepwise function is \(Tip = \beta_0 + \beta_1 Price + \beta_2 Race + \beta_3 Payment_Type + \beta_4 Gender + \beta_5 Miles\). The coefficients for each variable are below; the categorical variables are split by category. 
+
+\begin{center}
+<<model_summary_table,echo=FALSE,results=tex>>=
+print(xtable(summar$coefficients))
+coeffs <- summar$coefficients[,"Estimate"]
+tscore <- summar$coefficients[,"t value"]
+@
+\label{tab:fsum}
+\end{center}
+
+We can see in Table \ref{tab:fsum} is still the most significant variable with a t-score of \Sexpr{tscore[2]}. Its coefficient estimate is \Sexpr{coeffs[2]}, meaning for every one dollar more a customer would tip \$0.13. Payment Type also seems to be significant at the 99\% confidence level. People paying with a credit card tended to tip 50 cents less than cash payers. Gender and Miles are significant at the 90\% confidence level with t-scores of \Sexpr{tscore[3]} and \Sexpr{tscore[8]} respectively. Males tend to tip \$0.41 more than their female counterparts. The coefficient for Miles, 0.253 indicates customers living farther away will tip \$0.25 more for each mile located away from Chopsticks House. 
+The residual standard error, \Sexpr{summar$sigma}, is smaller than the residual standard error for the simple model (Tip\~Price), \Sexpr{summar$sigma}. This means smaller prediction intervals for model 2 and better coefficient estimates. The adjusted $\texit{R^2}$ for model 2, \Sexpr{summar$adj.r.squared}, is also an improvement from the simple model. 
+Given the coefficient esetimates and their corresponding t-tests the following model makes the most sense for the data. \[Tip~Price+PaymentType\]
+
+We now move onto the regression diagnostics section. Using the residuals we can check if the model and assumptions are consistent with the observed data. If the fitted model does not give a set of residuals that appear to be reasonable, then some aspect of the model, either the assumed mean function or assumptions concerning the variance function, may be called into doubt.
+
+\begin{center}
+  \begin{figure}
+<<residual_plots,echo=FALSE,fig=TRUE>>=
+lr <- lm(Tip~Price+Payment_Type,df)
+plot(lr)
+@
+  \end{figure}
+  \caption{Residual Diagnostic Graphs}
+  \label{fig:resdiag}
+\end{center}
+
+The plots for residual diagnostics are shown in Figure \ref{fig:resdiag}. The first plot indicates that there may be non-constant variance for larger fitted values, predicted values of Tip. Weary of the skew I ran a Breusch-Pagan Test to confirm homoscedasticity in the errors. The p-value, 0.08718 is not significant at the 95\% alpha level. Suspecting there still might be some uneven variance in errors a Box-Cox transformation was applied to the model. There were no significant lambda values which indicates Tip already forms a normal distribution with constant variance. 
+The Q-Q plot indicates residuals follow a normal distribution. It is expected that extreme values won't tread the line perfectly.
+The third and fourth plots identify possible outliers in the data. The three observations that have a squared standardized residual larger than 2 will receive further attention. Depending on their X (Price) they may exert an exaggerated influence on the coefficient estimates. However, the fourth plot indicating Cook distances for each observation shows that the three fall below the 1 threshold for Cooks distance and therefore do not leverage the coefficient estimates unfairly. The residuals that fall outside the threshold for standardized residuals and Cooks distances are boldened. 
+
+\begin{center}
+<<resid_table,echo=FALSE,results=tex>>=
+source("printbold.R")
+residTab <- data.frame("Residuals" = residuals(lr),"Hat_Values"=hatvalues(lr), "Standard" = rstandard(lr), "Jack-Knifed"=rstudent(lr), "Cooks_Distance"= cooks.distance(lr), "Predicted" = predict(lr))
+attach(residTab)
+indices = Standard>2 | Hat_Values > (32/nrow(residTab)) | Cooks_Distance >=1
+log_matrix <- cbind(rep(FALSE,sum(indices)),Hat_Values[indices]>(4/nrow(residTab)),abs(Standard[indices])>2,abs(Jack.Knifed[indices])>2,rep(FALSE,sum(indices)),rep(FALSE,sum(indices)))
+printbold(xtable(residTab[indices,]), which=log_matrix)
+@
+  \label{tab:residTab}
+\end{center}
+
+% \begin{center}
+% <<boxcoxtests,echo=FALSE>>=
+% library(MASS)
+% dlrh <- boxcox(df$Tip~df$Price)
+% bptest(dlrh)
+% @
+% \end{center}
+
+I was worried that a better model was obscured by all the \$0 tips received. \Sexpr{sum(df$Tip==0)/nrow(df)}\% of customers did not tip. To see if there was any insight the other variables could offer we fit the data into a logisitic model.
+
+<<logistic_summary,echo=FALSE,results=tex>>=
+df2 <- mutate(df, Tipped=ifelse(Tip==0,0,1))
+llr <- glm(Tipped~Price,family=binomial(link="logit"),df2)
+xtable(summary(llr))
+@
+Whether or not a customer tipped does not seem to be modelled well with a logistic model. The deviance \Sexpr{p(llr$deviance)} compared to the null deviance of \Sexpr{p(llr$null.deviance)} shows a tiny deviation of \Sexpr{p(llr$null.deviance - llr$deviance)} and therefore shows that despite the significance of the variable Price, the model is not a good fit.
+
+
+
+\end{document}
