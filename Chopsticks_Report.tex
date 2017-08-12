@@ -1,0 +1,33 @@
+---
+title: "Chopsticks_Project"
+author: "Clay Dustin"
+date: "July 18, 2017"
+output: pdf_document
+---
+require(ggplot2)
+require(gridExtra)
+require(knitr)
+require(xtable)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+\begin{Schunk}
+\begin{Sinput}
+> df <- read.csv("Chopsticks_Data_CA.csv", stringsAsFactors=FALSE)
+> for(i in c("Race","Gender","Type","Payment_Type","Age")){
++   df[, i] <- as.factor(df[,i])
++ }
+\end{Sinput}
+\end{Schunk}
+
+The Chopsticks data set includes data on customer's location, gender, age, race, and the response variable; tip. Information about the delivery's time and how the customer paid are also included. The data includes 786 observations recorded from May 31 to July 18, 2016, but only 300 with complete cases.
+
+# <<r 'data_head'>>=
+# xtable(head(df))
+# @
+Customer's demographics were not taken from an existing database but observed by the author. The age of each customer was estimated using three brackets; young (-25), middle (25-40), and old (40+). Race and gender were also left to the discretion of the author.
+
+\begin{Schunk}
+\begin{Sinput}
+> p1 <- ggplot(df, aes(x = Race, y = Tip)) + geom_boxplot()
